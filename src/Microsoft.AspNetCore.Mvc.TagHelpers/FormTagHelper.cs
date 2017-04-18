@@ -4,6 +4,8 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
+using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.Razor.TagHelpers;
@@ -13,14 +15,7 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
     /// <summary>
     /// <see cref="ITagHelper"/> implementation targeting &lt;form&gt; elements.
     /// </summary>
-    [HtmlTargetElement("form", Attributes = ActionAttributeName)]
-    [HtmlTargetElement("form", Attributes = AntiforgeryAttributeName)]
-    [HtmlTargetElement("form", Attributes = AreaAttributeName)]
-    [HtmlTargetElement("form", Attributes = FragmentAttributeName)]
-    [HtmlTargetElement("form", Attributes = ControllerAttributeName)]
-    [HtmlTargetElement("form", Attributes = RouteAttributeName)]
-    [HtmlTargetElement("form", Attributes = RouteValuesDictionaryName)]
-    [HtmlTargetElement("form", Attributes = RouteValuesPrefix + "*")]
+    [HtmlTargetElement("form")]
     public class FormTagHelper : TagHelper
     {
         private const string ActionAttributeName = "asp-action";
@@ -143,15 +138,20 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
             {
                 throw new ArgumentNullException(nameof(output));
             }
+
             if (Method != null)
             {
                 output.CopyHtmlAttribute(nameof(Method), context);
+            }
+            else
+            {
+                Method = "get";
             }
 
             var antiforgeryDefault = true;
 
             // If "action" is already set, it means the user is attempting to use a normal <form>.
-            if (output.Attributes.ContainsName(HtmlActionAttributeName))
+            if (output.Attributes.TryGetAttribute(HtmlActionAttributeName, out var actionAttribute))
             {
                 if (Action != null ||
                     Controller != null ||
@@ -173,9 +173,29 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
                             RouteValuesPrefix));
                 }
 
-                // User is using the FormTagHelper like a normal <form> tag. Antiforgery default should be false to
-                // not force the antiforgery token on the user.
-                antiforgeryDefault = false;
+                string attributeValue = null;
+                switch (actionAttribute.Value)
+                {
+                    case HtmlString htmlString:
+                        attributeValue = htmlString.ToString();
+                        break;
+                    case string stringValue:
+                        attributeValue = stringValue;
+                        break;
+                }
+
+                if (string.IsNullOrEmpty(attributeValue))
+                {
+                    // User is using the FormTagHelper like a normal <form> tag that has an empty action attribute.
+                    // i.e. <form action="" method="post">
+                    antiforgeryDefault = true;
+                }
+                else
+                {
+                    // User is using the FormTagHelper like a normal <form> tag. Antiforgery default should be false to
+                    // not force the antiforgery token on the user.
+                    antiforgeryDefault = false;
+                }
             }
             else
             {
@@ -201,8 +221,12 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
                     routeValues["area"] = Area;
                 }
 
-                TagBuilder tagBuilder;
-                if (Route == null)
+                TagBuilder tagBuilder = null;
+                if (Action == null && Controller == null && Route == null && _routeValues == null && Fragment == null && Area == null)
+                {
+                    // Empty form tag such as <form></form>. Let it flow to the output as-is and only handle anti-forgery.
+                }
+                else if (Route == null)
                 {
                     tagBuilder = Generator.GenerateForm(
                         ViewContext,
@@ -244,11 +268,11 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
                         output.PostContent.AppendHtml(tagBuilder.InnerHtml);
                     }
                 }
+            }
 
-                if (string.Equals(Method, "get", StringComparison.OrdinalIgnoreCase))
-                {
-                    antiforgeryDefault = false;
-                }
+            if (string.Equals(Method, "get", StringComparison.OrdinalIgnoreCase))
+            {
+                antiforgeryDefault = false;
             }
 
             if (Antiforgery ?? antiforgeryDefault)

@@ -27,6 +27,56 @@ namespace Microsoft.AspNetCore.Mvc.TagHelpers
     public class FormTagHelperTest
     {
         [Fact]
+        public async Task ProcessAsync_NoParametersOnlyGeneratesAntiforgery()
+        {
+            // Arrange
+            var expectedTagName = "form";
+            var metadataProvider = new TestModelMetadataProvider();
+            var tagHelperContext = new TagHelperContext(
+                tagName: "form",
+                allAttributes: new TagHelperAttributeList(),
+                items: new Dictionary<object, object>(),
+                uniqueId: "test");
+            var output = new TagHelperOutput(
+                expectedTagName,
+                attributes: new TagHelperAttributeList(),
+                getChildContentAsync: (useCachedResult, encoder) =>
+                {
+                    var tagHelperContent = new DefaultTagHelperContent();
+                    tagHelperContent.SetContent("Something");
+                    return Task.FromResult<TagHelperContent>(tagHelperContent);
+                });
+            var urlHelper = new Mock<IUrlHelper>();
+            urlHelper
+                .Setup(mock => mock.Action(It.IsAny<UrlActionContext>())).Returns("home/index");
+
+            var htmlGenerator = new TestableHtmlGenerator(metadataProvider, urlHelper.Object);
+            var viewContext = TestableHtmlGenerator.GetViewContext(
+                model: null,
+                htmlGenerator: htmlGenerator,
+                metadataProvider: metadataProvider);
+            var expectedPostContent = HtmlContentUtilities.HtmlContentToString(
+                htmlGenerator.GenerateAntiforgery(viewContext),
+                HtmlEncoder.Default);
+            var formTagHelper = new FormTagHelper(htmlGenerator)
+            {
+                ViewContext = viewContext,
+            };
+
+            // Act
+            await formTagHelper.ProcessAsync(tagHelperContext, output);
+
+            // Assert
+            Assert.Empty(output.Attributes);
+            Assert.Empty(output.PreElement.GetContent());
+            Assert.Empty(output.PreContent.GetContent());
+            Assert.Empty(output.Content.GetContent());
+            Assert.Equal(expectedPostContent, output.PostContent.GetContent());
+            Assert.Empty(output.PostElement.GetContent());
+            Assert.Equal(expectedTagName, output.TagName);
+        }
+
+        [Fact]
         public async Task ProcessAsync_GeneratesExpectedOutput()
         {
             // Arrange
